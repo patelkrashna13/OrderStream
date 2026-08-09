@@ -1,4 +1,4 @@
-# OrderStream — Scalable Order Ingestion System
+# OrderStream — Database Sharding Ingestion Architecture
 
 A scalable Node.js backend for processing bulk order files, securely storing raw data in Google Cloud Storage, and distributing validated orders across sharded PostgreSQL databases.
 
@@ -36,8 +36,6 @@ POST /upload-orders
 ```
 
 ![alt text](image.png)
-
-![alt text](image-1.png)
 
 ## 🛠️ Tech Stack
 
