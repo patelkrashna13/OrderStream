@@ -1,0 +1,43 @@
+{
+  "name": "backend-engineering-assessment",
+  "version": "1.0.0",
+  "description": "Scalable bulk order ingestion backend system with GCS cloud storage, stream parsing, and sharded PostgreSQL database.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "test": "node test/unit.test.js && node test/integration.test.js",
+    "test:unit": "node test/unit.test.js",
+    "test:integration": "node test/integration.test.js",
+    "generate-sample": "node test/generate-sample-data.js",
+    "migrate": "node src/database/migrate.js"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "postgresql",
+    "sharding",
+    "gcs",
+    "adc",
+    "streaming"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/storage": "^7.15.0",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

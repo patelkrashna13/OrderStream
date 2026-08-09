@@ -1,78 +1,109 @@
-# Backend Engineering Assessment — Scalable Order Ingestion System
+# OrderStream — Scalable Order Ingestion System
 
-A production-ready Node.js backend application designed to ingest, validate, and store bulk dataset files (~10,000 order records per upload in CSV or Excel format), archive raw files in Google Cloud Storage (GCS) using Google Application Default Credentials (ADC), and persist records into a horizontally sharded PostgreSQL database cluster.
+A scalable Node.js backend for processing bulk order files, securely storing raw data in Google Cloud Storage, and distributing validated orders across sharded PostgreSQL databases.
 
----
+## 🚀 Features
 
-## Technical Features & Highlights
+* **Streaming Processing** — Processes CSV/Excel files without loading the entire file into memory.
+* **Google Cloud Storage** — Archives uploaded files using Google Application Default Credentials (ADC).
+* **Application-Level Sharding** — Routes orders across PostgreSQL shards using `customer_id` hashing.
+* **Batch Inserts** — Inserts records in batches of 500 using PostgreSQL transactions.
+* **Error Isolation** — Invalid rows are logged and stored separately without stopping valid records.
+* **Observability** — Tracks import jobs, failed records, and structured logs using Pino.
 
-- **Stream-Based File Processing**: Incremental parsing of CSV (`csv-parser`) and Excel (`exceljs`) files under constant low memory usage (< 50MB RAM).
-- **Google ADC Integration**: Secure, credential-less GCP authentication via `gcloud` Application Default Credentials without hardcoded keys or committed secrets.
-- **Application-Level Sharding**: Horizontal write scaling across PostgreSQL database instances using a deterministic `customer_id` modulo hashing strategy.
-- **Transactional Batch Writes**: Grouping validated records into multi-row SQL insert batches (500 items per chunk) wrapped in explicit PostgreSQL transactions (`BEGIN` ... `COMMIT` / `ROLLBACK`).
-- **Defensive Error Isolation**: Row-level validation engine isolating and logging malformed rows without crashing the stream pipeline or terminating valid row persistence.
-- **Auditing & Observability**: Complete dead-letter storage (`failed_records`), job progress tracking (`import_jobs`), and structured JSON logging (`pino`).
+## 🏗️ Architecture
 
----
-
-## System Architecture
-
-```
-[ HTTP Multipart File Stream (POST /upload-orders) ]
-                         │
-                         ▼
-             [ API Ingestion Controller ]
-                         │
-        ┌────────────────┴────────────────┐
-        ▼                                 ▼
-[ GCS Stream Upload (via ADC) ]   [ Streaming File Parser ]
-(gs://bucket/orders/file.csv)     (CSV / Excel Row-by-Row)
-                                          │
-                                          ▼
-                              [ Row Validation Engine ]
-                              (Schema & Type Validation)
-                                     │         │
-                     (Valid Row)     │         │ (Invalid Row)
-                        ┌────────────┘         └────────────┐
-                        ▼                                   ▼
-             [ Application Shard Router ]          [ Isolated Error Logger ]
-             (customer_id Modulo Hashing)          (Insert into failed_records)
-                        │
-                        ▼
-      [ Transactional Batch Processor (500 items) ]
-                        │
-        ┌───────────────┴───────────────┐
-        ▼                               ▼
-[ PostgreSQL Shard 1 ]        [ PostgreSQL Shard 2 ]
+```text
+Client
+  │
+  ▼
+POST /upload-orders
+  │
+  ├──► Google Cloud Storage
+  │
+  └──► Streaming Parser
+          │
+          ├── Valid Rows
+          │      ▼
+          │   Shard Router
+          │      │
+          │      ├──► PostgreSQL Shard 1
+          │      └──► PostgreSQL Shard 2
+          │
+          └── Invalid Rows
+                 ▼
+            Failed Records
 ```
 
----
+![alt text](image.png)
 
-## 1. Quick Start & Execution Guide
+┌────────────┐
+                         │   Client   │
+                         │ (CSV/XLSX) │
+                         └─────┬──────┘
+                               │ POST /upload-orders (multipart)
+                               ▼
+                     ┌───────────────────┐
+                     │   API Server      │
+                     │ (Express, Node)   │
+                     └─────────┬─────────┘
+                    ┌──────────┴───────────┐
+                    ▼                      ▼
+          ┌───────────────────┐   ┌─────────────────────┐
+          │ GCS Upload (ADC)  │   │ Stream Parser +      │
+          │ raw file archive  │   │ Validator             │
+          └───────────────────┘   └─────────┬────────────┘
+                                   ┌─────────┴─────────┐
+                                   ▼                    ▼
+                          ┌───────────────┐    ┌──────────────────┐
+                          │ Invalid rows  │    │ Valid rows        │
+                          │ error table   │    │ batched (n=500)   │
+                          └───────────────┘    └─────────┬─────────┘
+                                                          ▼
+                                                 ┌──────────────────┐
+                                                 │  Shard Router     │
+                                                 │ hash(customer_id) │
+                                                 └─────────┬─────────┘
+                                    ┌─────────────────────┼─────────────────────┐
+                                    ▼                     ▼                     ▼
+                           ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
+                           │  PG Shard 0    │   │  PG Shard 1    │   │  PG Shard 2    │
+                           │  (pool)        │   │  (pool)        │   │  (pool)        │
+                           └────────────────┘   └────────────────┘   └────────────────┘
 
-### Prerequisites
-- Node.js (v18+ LTS)
-- PostgreSQL (v12+) engine instances
-- Google Cloud SDK CLI (`gcloud`)
 
-### Step 1: Clone & Install Dependencies
+## 🛠️ Tech Stack
+
+* Node.js
+* Express.js
+* PostgreSQL
+* Google Cloud Storage
+* `csv-parser`
+* `ExcelJS`
+* Pino
+
+## ⚡ Quick Start
+
+### 1. Install
+
 ```bash
 npm install
 ```
 
-### Step 2: Configure Environment Variables
-Copy `.env.example` to create your local `.env` configuration file:
+### 2. Configure Environment
+
 ```bash
 cp .env.example .env
 ```
 
-Ensure environment configuration values match your local database and GCS bucket settings:
+Example:
+
 ```env
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=info
 
-GCS_BUCKET_NAME=your-gcs-orders-bucket
+GCS_BUCKET_NAME=your-gcs-bucket
 
 DB_SHARD_COUNT=2
 DB_SHARD_1_URL=postgresql://postgres:postgres@localhost:5432/orders_shard_1
@@ -82,176 +113,155 @@ BATCH_SIZE=500
 MAX_FILE_SIZE_BYTES=52428800
 ```
 
-### Step 3: Run Database Schema Migrations
-Execute the automated database schema migration runner across all configured PostgreSQL shards:
+### 3. Run Migrations
+
 ```bash
 npm run migrate
 ```
 
-### Step 4: Start Server
-```bash
-# Production mode
-npm start
+### 4. Start Server
 
-# Development mode (with auto-reload)
+```bash
+npm start
+```
+
+Development:
+
+```bash
 npm run dev
 ```
 
-The application will launch on `http://localhost:3000`.
+Server runs on:
 
----
+```text
+http://localhost:3000
+```
 
-## 2. Google Application Default Credentials (ADC) Setup
+## ☁️ Google ADC Setup
 
-This project enforces Google Cloud's security mandate: **zero static service account key JSON files or plain secrets are committed to the code repository**.
+No service-account JSON keys are stored in the repository.
 
-### Local Development Authentication
-To authenticate locally with Google Cloud Storage:
+For local development:
 
-1. Install the [Google Cloud SDK CLI](https://cloud.google.com/sdk/docs/install).
-2. Authenticate your developer machine using Application Default Credentials:
-   ```bash
-   gcloud auth application-default login
-   ```
-3. Select your Google Cloud project containing the target GCS bucket. The `@google-cloud/storage` SDK automatically resolves these ADC credentials from your environment.
+```bash
+gcloud auth application-default login
+```
 
-### Cloud / Production Deployment Context
-In cloud hosting environments (such as Google Cloud Run, Google Kubernetes Engine, or Compute Engine), ADC automatically inherits the bound IAM Service Account identity via Workload Identity without requiring any local key files.
+The Google Cloud Storage SDK automatically uses these credentials.
 
----
+## 🗄️ Sharding Strategy
 
-## 3. Sharding Strategy Explanation & Rationale
+Order data uses **application-level sharding** based on `customer_id`.
 
-### Chosen Strategy: `customer_id` Modulo Hashing Strategy (Recommended)
+```text
+ShardIndex = Hash(customer_id) % NumberOfShards
+```
 
-The database persistence tier implements **Application-Level Sharding** with a **`customer_id` Modulo Hashing Strategy**.
+This keeps orders belonging to the same customer on the same shard, making customer-based queries efficient.
 
-#### How Shard Routing Works:
-1. When a validated order record is received, the `ShardRouter` passes the record's `customer_id` string into a deterministic MD5/32-bit integer hash function (`hashString(customer_id)`).
-2. The hash value is evaluated against the total shard count using modulo arithmetic:
-   $$\text{ShardIndex} = |\text{Hash}(\text{customer\_id})| \pmod{N}$$
-3. The `ShardRouter` routes the record or batch directly to the target `pg.Pool` connection pool corresponding to $\text{ShardIndex}$.
+### Why `customer_id`?
 
-#### Architectural Trade-offs & Benefits:
-- **Benefits**: Co-locates all order transactions for a given customer onto the same database shard instance. This makes customer order history queries (`GET /orders?customerId=`) highly optimal, executing directly against a single target shard without scatter-gather overhead.
-- **Alternative Strategies**:
-  - **Hash of `order_id`**: Ensures perfectly uniform data distribution across shards, but turns customer history queries into scatter-gather operations across all shards.
-  - **Time-Based (`order_date`)**: Ideal for time-series archiving, but creates write hotspots on the current month/year partition.
+* Simple deterministic routing
+* Even distribution across shards
+* Customer orders remain together
+* Avoids unnecessary scatter-gather queries
 
----
+## 📡 API Endpoints
 
-## 4. Architectural Design Decisions & Trade-Offs
+### Upload Orders
 
-| Decision | Rationale | Architectural Benefits | Trade-offs |
-| :--- | :--- | :--- | :--- |
-| **Streaming File Parsing** | Avoid loading full ~10k payloads into RAM. | Constant low memory usage (< 50MB RAM); handles concurrent large uploads. | Requires handling Node.js stream events and backpressure signals (`pause`/`resume`). |
-| **Google ADC Authentication** | Eliminates static cloud key files per assessment mandate. | High security posture; zero committed key vulnerabilities. | Local dev requires running `gcloud auth application-default login`. |
-| **Chunked Multi-Row Batch Inserts** | Executes bulk `INSERT INTO orders ... VALUES (...), (...)` in 500-item chunks. | Increases write throughput 10x–50x over single-row inserts; reduces network round-trips. | Requires temporary in-memory batch buffers before flushing to database. |
-| **Transactional Atomicity** | Wraps multi-row batch inserts in `BEGIN` ... `COMMIT` / `ROLLBACK` blocks. | Guarantees atomic writes per chunk; prevents dirty/corrupt database states. | Batch write failure triggers rollback for that specific 500-record chunk. |
-| **Defensive Row Validation** | Catches field type/constraint errors per row. | Non-fatal row errors are isolated, logged, and sent to `failed_records` without crashing ingestion. | Ingestion summary includes malformed row metrics. |
+```http
+POST /upload-orders
+```
 
----
+Accepts CSV/Excel files, uploads the raw file to GCS, validates records, and stores valid orders in PostgreSQL.
 
-## 5. API Endpoint Documentation
+### Get Order
 
-### 1. Ingest Bulk Orders File
-- **Endpoint**: `POST /upload-orders` or `POST /api/v1/upload-orders`
-- **Content-Type**: `multipart/form-data`
-- **Form Field**: `file` (CSV `.csv` or Excel `.xlsx`, `.xls` file)
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "status": "success",
-    "message": "Orders file ingested successfully.",
-    "data": {
-      "jobId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-      "filename": "sample_orders_10k.csv",
-      "gcsUri": "gs://orders-bucket/orders/1723000000000_sample_orders_10k.csv",
-      "metrics": {
-        "totalRecords": 10000,
-        "insertedRecords": 9900,
-        "failedRecords": 100,
-        "processingTimeMs": 3420
-      }
-    }
-  }
-  ```
+```http
+GET /orders/:orderId
+```
 
-### 2. Fetch Single Order (Bonus Endpoint)
-- **Endpoint**: `GET /orders/:orderId` or `GET /api/v1/orders/:orderId`
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "orderId": "ORD-2026-000001",
-      "customerId": "CUST-0001",
-      "orderDate": "2026-08-06T14:30:00.000Z",
-      "orderAmount": 149.99,
-      "status": "COMPLETED"
-    }
-  }
-  ```
+### Get Customer Orders
 
-### 3. Fetch Customer Orders (Bonus Endpoint)
-- **Endpoint**: `GET /orders?customerId=CUST-0001` or `GET /api/v1/orders?customerId=CUST-0001`
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "status": "success",
-    "data": {
-      "customerId": "CUST-0001",
-      "totalCount": 20,
-      "orders": [...]
-    }
-  }
-  ```
+```http
+GET /orders?customerId=CUST-0001
+```
 
-### 4. Health Check Endpoint (Bonus Endpoint)
-- **Endpoint**: `GET /health`
-- **Response (`200 OK`)**:
-  ```json
-  {
-    "status": "UP",
-    "timestamp": "2026-08-06T22:35:00.000Z",
-    "components": {
-      "gcsStorage": "CONNECTED",
-      "databaseShards": {
-        "shard1": "UP",
-        "shard2": "UP"
-      }
-    }
-  }
-  ```
+### Health Check
 
----
+```http
+GET /health
+```
 
-## 6. Testing Guide
+## 🔄 Processing Flow
 
-Generate a sample 10,000-record CSV test file:
+```text
+Upload File
+     ↓
+Store in GCS
+     ↓
+Stream & Parse
+     ↓
+Validate Rows
+     ↓
+Route to Shard
+     ↓
+Batch Insert
+     ↓
+Commit Transaction
+     ↓
+Return Processing Summary
+```
+
+Invalid records are isolated and stored in `failed_records`.
+
+## 🧪 Testing
+
+Generate sample data:
+
 ```bash
 npm run generate-sample
 ```
 
-Run automated unit and integration tests:
+Run all tests:
+
 ```bash
-# Run all tests
 npm test
+```
 
-# Run unit tests only
+Unit tests:
+
+```bash
 npm run test:unit
+```
 
-# Run integration tests only
+Integration tests:
+
+```bash
 npm run test:integration
 ```
 
----
+## 📁 Project Deliverables
 
-## 7. Submission Checklist Verification
+* Source code
+* `README.md`
+* PostgreSQL migrations
+* `.env.example`
+* Unit & integration tests
 
-- [x] **Source Code (Git Repository)**: Modular Node.js codebase adhering to clean architecture rules.
-- [x] **`README.md`**: Complete documentation for setup, ADC config, sharding strategy, and trade-offs.
-- [x] **SQL Migrations**: `src/database/migrations/001_create_tables.sql` DDLs and indexing scripts.
-- [x] **`.env.example`**: Clean environment template without committed secret keys.
-#   O r d e r S t r e a m  
- 
+## 📌 Key Design Decisions
+
+| Decision                | Purpose                  |
+| ----------------------- | ------------------------ |
+| Streaming               | Low memory usage         |
+| GCS + ADC               | Secure file storage      |
+| Customer-based sharding | Scalable database writes |
+| Batch inserts           | Better performance       |
+| Transactions            | Data consistency         |
+| Failed records          | Fault isolation          |
+| Structured logging      | Better observability     |
+
+## 👨‍💻 Project
+
+**OrderStream — High-Performance Order Ingestion & Processing Platform**

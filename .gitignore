@@ -1,0 +1,36 @@
+# Node.js Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment Variables & Secret Configuration
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+*.env
+!.env.example
+
+# Service Account Keys & GCP Secrets (Google ADC Security Mandate)
+*key*.json
+*secret*.json
+*credential*.json
+*service-account*.json
+*.pem
+*.key
+
+# Generated Logs & Temporary Test Files
+*.log
+logs/
+test/sample_orders_10k.csv
+
+# OS & IDE Configuration Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
