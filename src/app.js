@@ -1,6 +1,7 @@
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
+const path = require('path');
 const express = require('express');
 const config = require('./config');
 const logger = require('./utils/logger');
@@ -10,10 +11,12 @@ const { errorHandler } = require('./middlewares/error.middleware');
 const { setupSwagger } = require('./swagger');
 
 const app = express();
+const publicDir = path.join(__dirname, '../public');
 
 // Global Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(publicDir));
 
 // Register Swagger UI Documentation
 setupSwagger(app, '/api-docs');
@@ -21,15 +24,20 @@ setupSwagger(app, '/api-docs');
 // Health Check Endpoint
 app.get('/health', orderRoutes);
 
-// Root Status Endpoint
-app.get('/', (req, res) => {
+// API Status Endpoint
+app.get('/api/status', (req, res) => {
   res.json({
     status: 'success',
-    message: 'Backend Engineering Assessment API Service',
+    message: 'OrderStream API service is available',
     environment: config.env,
     swaggerDocs: `http://localhost:${config.port}/api-docs`,
     timestamp: new Date().toISOString(),
   });
+});
+
+// React Front Page
+app.get('/', (req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
 });
 
 // API Routes
